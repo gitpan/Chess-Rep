@@ -1,4 +1,8 @@
-Revision history for Chess-Rep
+Revision history for Chess-Rep                          -*- change-log -*-
 
-0.1     Apr 04, 2008
-        First public release.
+0.1.1	Apr 26, 2008
+	Fixed a nasty bug that caused "e8g8" to be always misinterpreted as
+	a O-O, even when another piece than the K was moved
+
+0.1	Apr 04, 2008
+	First public release.

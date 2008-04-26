@@ -4,7 +4,7 @@ use strict;
 
 use POSIX;
 
-our $VERSION = '0.1.1';
+our $VERSION = '0.2';
 
 use constant {
     CASTLE_W_OO  => 1,
