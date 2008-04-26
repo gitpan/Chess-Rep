@@ -4,7 +4,7 @@ use strict;
 
 use POSIX;
 
-our $VERSION = '0.1';
+our $VERSION = '0.1.1';
 
 use constant {
     CASTLE_W_OO  => 1,
@@ -182,13 +182,13 @@ a correct index.  I should optimize this.
 
 =cut
 
-=head1 METHODS AND FUNCTIONS
+=head1 OBJECT METHODS
 
-=head3 new($fen)
+=head2 new($fen)
 
-Constructs a new object.  Pass a FEN string if you want to initialize
-to a certain position.  Otherwise it will be initialized with the
-standard starting position.
+Constructor.  Pass a FEN string if you want to initialize to a certain
+position.  Otherwise it will be initialized with the standard starting
+position.
 
 =cut
 
@@ -210,7 +210,7 @@ sub reset {
     shift->set_from_fen(FEN_STANDARD);
 }
 
-=head3 set_from_fen($fen)
+=head2 set_from_fen($fen)
 
 Reset this object to a position described in FEN notation.
 
@@ -255,14 +255,14 @@ sub set_from_fen {
     $self->_compute_valid_moves;
 }
 
-=head3 get_fen()
+=head2 get_fen()
 
 Returns the current position in standard FEN notation.
 
 =cut
 
 sub get_fen {
-    my ($self) = @_;
+    my ($self, $short) = @_;
     my @a;
     for (my $row = 8; --$row >= 0;) {
         my $str = '';
@@ -293,13 +293,14 @@ sub get_fen {
     $c .= 'q' if $castle & CASTLE_B_OOO;
     $a[2] = $c || '-';
     $a[3] = $self->{enpa} ? lc get_field_id($self->{enpa}) : '-';
-    # FIXME: ignoring "halfmove clock" and "fullmove number"
-    $a[4] = $self->{halfmove};
-    $a[5] = $self->{fullmove};
+    if (!$short) {
+        $a[4] = $self->{halfmove};
+        $a[5] = $self->{fullmove};
+    }
     return join(' ', @a);
 }
 
-=head3 status()
+=head2 status()
 
 Returns the status of the current position.  The status is
 automatically computed by an internal function --
@@ -317,7 +318,9 @@ _compute_valid_moves() -- and it's a hash as follows:
 The last three are obvious -- simple boolean indicators that describe
 the position state.  The first three are:
 
-=head4 * B<moves>
+=over
+
+=item * B<moves>
 
 An array of all the legal moves.  A move is represented as a hash
 containing:
@@ -328,7 +331,7 @@ containing:
     piece => $id_of_the_moved_piece
   }
 
-=head4 * B<hash_moves>
+=item * B<hash_moves>
 
 A hash table containing as keys all legal moves, in the form
 "$from_index:$to_index".  For example, should E2-E4 be the single
@@ -338,7 +341,7 @@ legal move, then this hash would be:
     '35-55' => 1
   }
 
-=head4 * B<type_moves>
+=item * B<type_moves>
 
 Again a hash table that maps target fields to piece types.  For
 example, if you want to determine all white bishops that can move on
@@ -351,6 +354,8 @@ bishops that are allowed to move on C4.
 
 This hash is mainly useful when we interpret standard algebraic
 notation.
+
+=back
 
 =cut
 
@@ -375,7 +380,7 @@ sub _reset {
     $self->{status} = undef;
 }
 
-=head3 set_piece_at($where, $piece)
+=head2 set_piece_at($where, $piece)
 
 Sets the piece at the given position.  $where can be:
 
@@ -399,7 +404,7 @@ sub set_piece_at {
     return $old;
 }
 
-=head3 get_piece_at($where, $col)
+=head2 get_piece_at($where, $col)
 
 Returns the piece at the given position.  $where can be:
 
@@ -435,7 +440,7 @@ sub get_piece_at {
     return $p;
 }
 
-=head3 to_move()
+=head2 to_move()
 
 Returns (and optionally sets if you pass an argument) the color to
 move.  Colors are 0 (black) or 1 (white).
@@ -449,7 +454,7 @@ sub to_move {
     return $self->{to_move};
 }
 
-=head3 go_move($move)
+=head2 go_move($move)
 
 Updates the position with the given move.  The parser is very
 forgiving; it understands a wide range of move formats:
@@ -608,18 +613,20 @@ sub go_move {
   SPECIAL: {
         # 1. if it's castling, we have to move the rook
         $move = "$from-$to";
-        if ($move eq 'E1-G1') {
-            $san = 'O-O';
-            $self->_move_piece(28, 26); last SPECIAL;
-        } elsif ($move eq 'E8-G8') {
-            $san = 'O-O';
-            $self->_move_piece(98, 96); last SPECIAL;
-        } elsif ($move eq 'E1-C1') {
-            $san = 'O-O-O';
-            $self->_move_piece(21, 24); last SPECIAL;
-        } elsif ($move eq 'E8-C8') {
-            $san = 'O-O-O';
-            $self->_move_piece(91, 94); last SPECIAL;
+        if (lc $piece eq 'k') {
+            if ($move eq 'E1-G1') {
+                $san = 'O-O';
+                $self->_move_piece(28, 26); last SPECIAL;
+            } elsif ($move eq 'E8-G8') {
+                $san = 'O-O';
+                $self->_move_piece(98, 96); last SPECIAL;
+            } elsif ($move eq 'E1-C1') {
+                $san = 'O-O-O';
+                $self->_move_piece(21, 24); last SPECIAL;
+            } elsif ($move eq 'E8-C8') {
+                $san = 'O-O-O';
+                $self->_move_piece(91, 94); last SPECIAL;
+            }
         }
 
         # 2. is it en_passant?
@@ -789,7 +796,7 @@ sub _compute_valid_moves {
     };
 }
 
-=head3 is_attacked($index, $color, $try_move)
+=head2 is_attacked($index, $color, $try_move)
 
 Checks if the field specified by $index is under attack by a piece of
 the specified $color.
@@ -1021,7 +1028,7 @@ sub _get_allowed_K_moves {
     return $moves;
 }
 
-=head3 can_castle($color, $ooo)
+=head2 can_castle($color, $ooo)
 
 Return true if the given $color can castle kingside (if $ooo is false)
 or queenside (if you pass $ooo true).
@@ -1037,13 +1044,13 @@ sub can_castle {
     }
 }
 
-=head3 piece_color($piece)
+=head2 piece_color($piece)
 
 You can call this both as an object method, or standalone.  It returns
 the color of the specified piece.  Example:
 
-  piece_color('P') --> 1
-  piece_color('k') --> 0
+  Chess::Rep::piece_color('P') --> 1
+  Chess::Rep::piece_color('k') --> 0
   $self->piece_color('e2') --> 1  (in standard position)
 
 If you call it as a method, the argument must be a field specifier
@@ -1058,7 +1065,7 @@ sub piece_color {
     return ord($p) < 97 ? 1 : 0;
 }
 
-=head3 get_index($row, $col)
+=head2 get_index($row, $col)
 
 Static function.  Computes the full index for the given $row and $col
 (which must be in 0..7).
@@ -1067,8 +1074,8 @@ Additionally, you can pass a field ID instead (and omit $col).
 
 Examples:
 
-  get_index(2, 4) --> 45
-  get_index('e3') --> 45
+  Chess::Rep::get_index(2, 4) --> 45
+  Chess::Rep::get_index('e3') --> 45
 
 =cut
 
@@ -1079,12 +1086,12 @@ sub get_index {
     return $row * 10 + $col + 21;
 }
 
-=head3 get_field_id($index)
+=head2 get_field_id($index)
 
 Returns the ID of the field specified by the given index.
 
-  get_field_id(45) --> 'e3'
-  get_field_id('f4') --> 'f4' (quite pointless)
+  Chess::Rep::get_field_id(45) --> 'e3'
+  Chess::Rep::get_field_id('f4') --> 'f4' (quite pointless)
 
 =cut
 
@@ -1095,13 +1102,13 @@ sub get_field_id {
     return pack('CC', $col + 65, $row + 49);
 }
 
-=head3 get_row_col($where)
+=head2 get_row_col($where)
 
 Returns a list of two values -- the $row and $col of the specified
 field.  They are in 0..7.
 
-  get_row_col('e3') --> (2, 4)
-  get_row_col(45) --> (2, 4)
+  Chess::Rep::get_row_col('e3') --> (2, 4)
+  Chess::Rep::get_row_col(45) --> (2, 4)
 
 =cut
 
@@ -1122,10 +1129,10 @@ sub get_row_col {
     }
 }
 
-=head3 dump_pos()
+=head2 dump_pos()
 
-Returns a string with the current position (in a form more readable
-than standard FEN).  It's only useful for debugging.
+Object method.  Returns a string with the current position (in a form
+more readable than standard FEN).  It's only useful for debugging.
 
 =cut
 
@@ -1135,7 +1142,9 @@ sub dump_pos {
     my @a = split(/ /, $fen);
     $fen = shift @a;
     $fen =~ s/([1-8])/' 'x$1/ge;
-    $fen =~ s/\//\n/g;
+    $fen =~ s{([^/])}{|$1}g;
+    $fen =~ s/\//|\n|-+-+-+-+-+-+-+-|\n/g;
+    $fen .= '|';
     return $fen;
 }
 
