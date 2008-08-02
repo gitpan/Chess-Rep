@@ -1,11 +1,14 @@
-# http://module-build.sourceforge.net/META-spec.html
-#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
-name:         Chess-Rep
-version:      0.2
-version_from: lib/Chess/Rep.pm
-installdirs:  site
-requires:
+--- #YAML:1.0
+name:                Chess-Rep
+version:             0.4
+abstract:            represent chess positions, generate list of legal moves, parse moves in various formats.
+license:             ~
+author:              
+    - Mihai Bazon <mihai.bazon@gmail.com>
+generated_by:        ExtUtils::MakeMaker version 6.42
+distribution_type:   module
+requires:     
     Test::More:                    0
-
-distribution_type: module
-generated_by: ExtUtils::MakeMaker version 6.30_01
+meta-spec:
+    url:     http://module-build.sourceforge.net/META-spec-v1.3.html
+    version: 1.3

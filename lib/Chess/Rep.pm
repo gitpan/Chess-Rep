@@ -4,27 +4,95 @@ use strict;
 
 use POSIX;
 
-our $VERSION = '0.2';
+our $VERSION = '0.4';
 
-use constant {
+use constant ({
     CASTLE_W_OO  => 1,
     CASTLE_W_OOO => 2,
     CASTLE_B_OO  => 4,
     CASTLE_B_OOO => 8,
-};
+    PIECE_TO_ID => {
+        p => 0x01,              # black pawn
+        n => 0x02,              # black knight
+        k => 0x04,              # black king
+        b => 0x08,              # black bishop
+        r => 0x10,              # black rook
+        q => 0x20,              # black queen
+        P => 0x81,              # white pawn
+        N => 0x82,              # white knight
+        K => 0x84,              # white king
+        B => 0x88,              # white bishop
+        R => 0x90,              # white rook
+        Q => 0xA0,              # white queen
+    },
+    ID_TO_PIECE => [
+        undef,                  # 0
+        'p',                    # 1
+        'n',                    # 2
+        undef,                  # 3
+        'k',                    # 4
+        undef,                  # 5
+        undef,                  # 6
+        undef,                  # 7
+        'b',                    # 8
+        undef,                  # 9
+        undef,                  # 10
+        undef,                  # 11
+        undef,                  # 12
+        undef,                  # 13
+        undef,                  # 14
+        undef,                  # 15
+        'r',                    # 16
+        undef,                  # 17
+        undef,                  # 18
+        undef,                  # 19
+        undef,                  # 20
+        undef,                  # 21
+        undef,                  # 22
+        undef,                  # 23
+        undef,                  # 24
+        undef,                  # 25
+        undef,                  # 26
+        undef,                  # 27
+        undef,                  # 28
+        undef,                  # 29
+        undef,                  # 30
+        undef,                  # 31
+        'q',                    # 32
+    ],
+    FEN_STANDARD => 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+});
 
 use Exporter 'import';
 
 our %EXPORT_TAGS = (
-    castle => [qw( CASTLE_W_OO
-                   CASTLE_W_OOO
-                   CASTLE_B_OO
-                   CASTLE_B_OOO )],
+    castle => [
+        qw( CASTLE_W_OO
+            CASTLE_W_OOO
+            CASTLE_B_OO
+            CASTLE_B_OOO
+      )],
+    other => [
+        qw( PIECE_TO_ID
+            ID_TO_PIECE
+            FEN_STANDARD
+      )],
 );
 
-Exporter::export_ok_tags('castle');
+{
+    my %seen;
 
-use constant FEN_STANDARD => 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    push @{$EXPORT_TAGS{all}},
+      grep {!$seen{$_}++} @{$EXPORT_TAGS{$_}} foreach keys %EXPORT_TAGS;
+}
+
+Exporter::export_ok_tags('castle');
+Exporter::export_ok_tags('all');
+
+my @MOVES_N = (31, 33, 14, 18, -18, -14, -33, -31);
+my @MOVES_B = (15, 17, -15, -17);
+my @MOVES_R = (1, 16, -16, -1);
+my @MOVES_K = (@MOVES_B, @MOVES_R);
 
 =head1 NAME
 
@@ -80,105 +148,76 @@ also generates a set of all valid moves for the color to play.
 
 =head2 Pieces and colors
 
-Pieces are represented as single letters, in the standard notation:
+As of version B<0.4>, a piece is represented as a byte, as follows:
 
-  P - pawn
-  N - knight
-  B - bishop
-  R - rook
-  Q - queen
-  K - king
+        p => 0x01  # black pawn
+        n => 0x02  # black knight
+        k => 0x04  # black king
+        b => 0x08  # black bishop
+        r => 0x10  # black rook
+        q => 0x20  # black queen
+        P => 0x81  # white pawn
+        N => 0x82  # white knight
+        K => 0x84  # white king
+        B => 0x88  # white bishop
+        R => 0x90  # white rook
+        Q => 0xA0  # white queen
 
-We use uppercase to represent white pieces and lowercase for black
-pieces, as in standard FEN notation.
+This representation is incompatible with older versions, which were
+representing a piece as a char.  Performance is the main reason for
+this change.  For example, in order to test if a piece is king
+(regardless the color) we now do:
 
-Whenever you need to deal with colors alone, 0 means black and 1 is
-white.  For example the piece_color($p) function returns 0 for a black
-piece and 1 for a white piece.
+    $p & 0x04
+
+while in versions prior to 0.4 we needed to do:
+
+    lc $p eq 'k'
+
+Similarly, if we wanted to check if a piece is a queen or a bishop, in
+previous version we had:
+
+    lc $p eq 'q' || lc $p eq 'b'
+
+while in the new version we do:
+
+    $p & 0x28
+
+which is considerably faster.  (if you wonder why the difference
+between 0.03 milliseconds and 0.01 milliseconds matters all that much,
+try writing a chess engine).
+
+To determine the color of a piece, AND with 0x80 (zero means a black
+piece, 0x80 is white piece).  In previous version we needed to do uc
+$p eq $p, a lot slower.
 
 =head2 Position
 
-The diagram is represented in an array, according to an idea
-originally developed for Sargon [2].  It is imagined as a two
-dimensional array of 12 rows and 10 columns (although we really use a
-plain array and just map field indexes to row/cols as needed).  Using
-a bigger board, we keep an "undef" value in the fields that are
-off-board and it becomes very easy to generate moves.  Here's how it
-looks like:
+The diagram is represented in the "0x88 notation" (see [2]) -- an
+array of 128 elements, of which only 64 are used.  An index in this
+array maps directly to a row, col in the chess board like this:
 
-  * * * * * * * * * *
-  * * * * * * * * * *
-  * r n b q k b n r *
-  * p p p p p p p p *
-  * - - - - - - - - *
-  * - - - - - - - - *
-  * - - - - - - - - *
-  * - - - - - - - - *
-  * P P P P P P P P *
-  * R N B Q K B N R *
-  * * * * * * * * * *
-  * * * * * * * * * *
+    my ($row, $col) = (1, 4); # E2
+    my $index = $row << 4 | $col;  ( = 0x14)
 
-The stars are "off-board fields" (undef-s).  The dashes are empty
-squares (contain 0).
-
-Now, let's see the array above, this time with field numbers (indexes)
-instead of pieces.
-
-    110   111   112   113   114   115   116   117   118   119
-    100   101   102   103   104   105   106   107   108   109
-        +-----------------------------------------------+
-     90 |  91    92    93    94    95    96    97    98 |  99
-     80 |  81    82    83    84    85    86    87    88 |  89
-     70 |  71    72    73    74    75    76    77    78 |  79
-     60 |  61    62    63    64    65    66    67    68 |  69
-     50 |  51    52    53    54    55    56    57    58 |  59
-     40 |  41    42    43    44    45    46    47    48 |  49
-     30 |  31    32    33    34    35    36    37    38 |  39
-     20 |  21    22    23    24    25    26    27    28 |  29
-        +-----------------------------------------------+
-     10    11    12    13    14    15    16    17    18    19
-      0     1     2     3     4     5     6     7     8     9
-
-The indexes that map to valid board fields are B<21..28>, B<31..38>,
-... B<91..98>.  For these fields, our array will contain 0 if the
-field is empty, or a piece character.  For offboard fields, our array
-will contain B<undef>.  It's thus very easy to generate moves for
-pieces.
-
-For example, let's say that we have a N (knight) on field 31 ('a2' on
-a chess board) and we need to generate a list of all fields where it
-can possibly move.  All we have to do is to add some values to the
-starting position (31) and check that the resulting field is in board.
-
-  31 + 19 = 50  (off board)
-  31 + 21 = 52  (valid)
-  31 +  8 = 39  (off board)
-  31 + 12 = 43  (valid)
-  31 - 19 = 12  (off board)
-  31 - 21 = 10  (off board)
-  31 -  8 = 23  (valid)
-  31 - 12 = 19  (off board)
-
-Using simple arithmetic operations we determined the 3 fields that a
-knight on a3 is allowed to move to.  Similar logic can be easily
-applied for all piece types.
+Valid row and col numbers are 0..7 (so they have bit 4 unset),
+therefore it's easy to detect when an index is offboard by AND with
+0x88.  Read [2] for more detailed description of this representation.
 
 =head2 Some terms used in this doc
 
 Following, when I refer to a field "index", I really mean an index in
-that array, which can be 0..119.  Using get_index() you can compute an
-index from a field ID.  By field ID I mean a field in standard
-notation, i.e. 'e4' (case insensitive).
+the position array, which can be 0..127.  Using get_index() you can
+compute an index from a field ID.
+
+By field ID I mean a field in standard notation, i.e. 'e4' (case
+insensitive).
 
 When I refer to row / col, I mean a number 0..7.  Field A1 corresponds
-to row = 0 and col = 0, and has index 21.  Field H7 has row = 7, col =
-7 and index 98.
+to row = 0 and col = 0, and has index 0x00.  Field H7 has row = 7, col
+= 7 and index 0x77.
 
-Internally this object works with field indexes.  TODO: most functions
-accept field ID-s too (or even row/col), which probably slows things
-down because they have to check the form of the argument and determine
-a correct index.  I should optimize this.
+Internally this object works with field indexes.
 
 =cut
 
@@ -227,8 +266,9 @@ sub set_from_fen {
         my $col = 0;
         while (length $data > 0) {
             my $p = substr($data, 0, 1, '');
-            if ($p =~ /[pnbrqk]/i) {
-                $self->set_piece_at(get_index($row, $col++), $p);
+            my $id = PIECE_TO_ID->{$p};
+            if ($id) {
+                $self->set_piece_at_index(get_index_from_row_col($row, $col++), $id);
             } elsif ($p =~ /[1-8]/) {
                 $col += $p;
             } else {
@@ -243,7 +283,7 @@ sub set_from_fen {
     $c |= CASTLE_B_OOO if index($castle, 'q') >= 0;
     $self->{castle} = $c;
     if (lc $to_move eq 'w') {
-        $self->{to_move} = 1;
+        $self->{to_move} = 0x80;
     } elsif (lc $to_move eq 'b') {
         $self->{to_move} = 0;
     } else {
@@ -268,8 +308,9 @@ sub get_fen {
         my $str = '';
         my $empty = 0;
         for my $col (0..7) {
-            my $p = $self->get_piece_at($row, $col);
+            my $p = $self->get_piece_at_index(get_index_from_row_col($row, $col));
             if ($p) {
+                $p = ($p & 0x80) ? uc ID_TO_PIECE->[$p & 0x3F] : ID_TO_PIECE->[$p];
                 $str .= $empty
                   if $empty;
                 $empty = 0;
@@ -308,6 +349,7 @@ _compute_valid_moves() -- and it's a hash as follows:
 
   {
     moves      => \@array_of_all_legal_moves,
+    pieces     => \@array_of_pieces_to_move,
     hash_moves => \%hash_of_all_legal_moves,
     type_moves => \%hash_of_moves_by_type_and_target_field,
     check      => 1 if king is in check, undef otherwise,
@@ -347,7 +389,7 @@ Again a hash table that maps target fields to piece types.  For
 example, if you want to determine all white bishops that can move on
 field C4 (index 58), you can do the following:
 
-  my $a = $self->status->{type_moves}{58}{B};
+  my $a = $self->status->{type_moves}{58}{0x88};
 
 @$a now contains the indexes of the fields that currently hold white
 bishops that are allowed to move on C4.
@@ -365,15 +407,11 @@ sub status {
 
 sub _reset {
     my ($self) = @_;
-    my @a;
-    for my $i (0..119) {
-        my $m = $i % 10;
-        $a[$i] = $i < 21 || $i > 98 || $m == 0 || $m == 9
-          ? undef : 0;
-    }
+    my @a = (0) x 128;
     $self->{pos} = \@a;
     $self->{castle} = CASTLE_W_OO | CASTLE_W_OOO | CASTLE_B_OO | CASTLE_B_OOO;
-    $self->{to_move} = 1; # white
+    $self->{has_castled} = 0;
+    $self->{to_move} = 0x80; # white
     $self->{enpa} = 0;
     $self->{halfmove} = 0;
     $self->{fullmove} = 0;
@@ -389,7 +427,7 @@ Sets the piece at the given position.  $where can be:
 
 The following are equivalent:
 
-  $self->set_piece_at(35, 'P');
+  $self->set_piece_at(0x14, 'P');
   $self->set_piece_at('e2', 'P');
 
 =cut
@@ -399,7 +437,22 @@ sub set_piece_at {
     if ($index =~ /^[a-h]/oi) {
         $index = get_index($index);
     }
-    my $old = $self->get_piece_at($index);
+    my $old = $self->{pos}[$index];
+    $self->{pos}[$index] = $p;
+    return $old;
+}
+
+=head2 set_piece_at_index($index, $p)
+
+Sets the piece at the given index to $p.  Returns the old piece.  It's
+similar to the function above, but faster as it only works with field
+indexes.
+
+=cut
+
+sub set_piece_at_index {
+    my ($self, $index, $p) = @_;
+    my $old = $self->{pos}[$index];
     $self->{pos}[$index] = $p;
     return $old;
 }
@@ -415,7 +468,7 @@ Returns the piece at the given position.  $where can be:
 The following are equivalent:
 
   $self->get_piece_at('e2');
-  $self->get_piece_at(35);
+  $self->get_piece_at(0x14);
   $self->get_piece_at(1, 4);
 
 If you call this function in array context, it will return the index
@@ -423,7 +476,7 @@ of the field as well; this is useful if you don't pass a computed
 index:
 
   ($piece, $index) = $self->get_piece_at('e2');
-  # now $piece is 'P' and $index is 35
+  # now $piece is 'P' and $index is 0x14
 
 =cut
 
@@ -440,6 +493,23 @@ sub get_piece_at {
     return $p;
 }
 
+=head2 get_piece_at_index($index)
+
+Similar to the above function, this one is faster if you know for sure
+that you pass an $index to it.  That is, it won't support $row, $col
+or field IDs, it only does field indexes.
+
+  $self->get_piece_at_index(0x14)
+    == $self->get_piece_at(1, 4)
+    == $self->get_piece_at('e2')
+    == $self->get_piece_at(0x14)
+
+=cut
+
+sub get_piece_at_index {
+    return shift->{pos}[shift];
+}
+
 =head2 to_move()
 
 Returns (and optionally sets if you pass an argument) the color to
@@ -449,8 +519,9 @@ move.  Colors are 0 (black) or 1 (white).
 
 sub to_move {
     my $self = shift;
-    $self->{to_move} = shift
-      if @_;
+    if (@_) {
+        $self->{to_move} = $_[0] ? 0x80 : 0;
+    }
     return $self->{to_move};
 }
 
@@ -471,11 +542,11 @@ move.  For example, for "axb8=Q" it will return:
 
   {
     from        => 'A7'
-    from_index  => 81
+    from_index  => 0x60
     from_row    => 6
     from_col    => 0
     to          => 'B8'
-    to_index    => 92
+    to_index    => 0x71
     to_row      => 7
     to_col      => 1
     piece       => 'P'
@@ -502,14 +573,14 @@ sub go_move {
 
     my $orig_move = $move;
 
-    if ($move eq 'O-O') {
-        $move = $color ? 'E1-G1' : 'E8-G8';
-    } elsif ($move eq 'O-O-O') {
-        $move = $color ? 'E1-C1' : 'E8-C8';
+    if (index($move, 'O-O-O') == 0) {
+        $move = $color ? 'E1C1' : 'E8C8';
+    } elsif (index($move, 'O-O') == 0) {
+        $move = $color ? 'E1G1' : 'E8G8';
     }
 
     if ($move =~ s/^([PNBRQK])//) {
-        $piece = $1;
+        $piece = lc $1;
     }
 
     if ($move =~ s/^([a-h][1-8])[:x-]?([a-h][1-8])//i) { # great, no ambiguities
@@ -540,22 +611,20 @@ sub go_move {
         $promote = uc $1;
     }
 
-    if (!$piece) {
+    if ($piece) {
+        $piece = PIECE_TO_ID->{$piece};
+    } else {
         if (!$from) {
-            $piece = 'P';
+            $piece = 1;         # black pawn
         } else {
-            $piece = $self->get_piece_at($from);
+            ($piece, $from_index) = $self->get_piece_at($from);
             if (!$piece) {
                 die("Illegal move: $orig_move (field $from is empty)");
             }
         }
     }
 
-    my $is_pawn = lc $piece eq 'p';
-
-    if (!$color) { # is black, make lowercase
-        $piece = lc $piece;
-    }
+    $piece |= $color;           # apply color
 
     if (!$to) {
         die("Can't parse move: $orig_move (missing target field)");
@@ -567,10 +636,11 @@ sub go_move {
     my $tpmove = $self->{status}{type_moves}{$to_index}{$piece};
 
     if (!$tpmove || !@$tpmove) {
-        die("Illegal move: $orig_move (no piece '$piece' can move to $to)");
+        die("Illegal move: $orig_move");
     }
 
     if (!$from) {
+        # print Data::Dumper::Dumper($tpmove), "\n";
         if (@$tpmove == 1) {
             # unambiguous
             $from_index = $tpmove->[0];
@@ -586,14 +656,19 @@ sub go_move {
                 }
             }
         }
-        if ($from_index) {
+        if (defined $from_index) {
             $from = get_field_id($from_index);
         } else {
             die("Ambiguous move: $orig_move");
         }
+    } else {
+        my @tmp = grep { $_ == $from_index } @$tpmove;
+        unless (@tmp) {
+            die("Illegal move: $orig_move");
+        }
     }
 
-    if (!$from_index) {
+    unless (defined $from_index) {
         $from_index = get_index($from);
     }
 
@@ -605,48 +680,61 @@ sub go_move {
 
     # execute move
 
+    my $prev_enpa = $self->{enpa};
     $self->{enpa} = 0;
 
     my $is_capture = 0;
     my $san;                    # compute canonical notation
+    my $is_pawn = $piece & 0x01;
 
   SPECIAL: {
         # 1. if it's castling, we have to move the rook
-        $move = "$from-$to";
-        if (lc $piece eq 'k') {
-            if ($move eq 'E1-G1') {
+        if ($piece & 0x04) {    # is king?
+            if ($from_index == 0x04 && $to_index == 0x06) {
                 $san = 'O-O';
-                $self->_move_piece(28, 26); last SPECIAL;
-            } elsif ($move eq 'E8-G8') {
+                $self->{has_castled} |= CASTLE_W_OO;
+                $self->_move_piece(0x07, 0x05);
+                last SPECIAL;
+            } elsif ($from_index == 0x74 && $to_index == 0x76) {
                 $san = 'O-O';
-                $self->_move_piece(98, 96); last SPECIAL;
-            } elsif ($move eq 'E1-C1') {
+                $self->{has_castled} |= CASTLE_B_OO;
+                $self->_move_piece(0x77, 0x75);
+                last SPECIAL;
+            } elsif ($from_index == 0x04 && $to_index == 0x02) {
                 $san = 'O-O-O';
-                $self->_move_piece(21, 24); last SPECIAL;
-            } elsif ($move eq 'E8-C8') {
+                $self->{has_castled} |= CASTLE_W_OOO;
+                $self->_move_piece(0x00, 0x03);
+                last SPECIAL;
+            } elsif ($from_index == 0x74 && $to_index == 0x72) {
                 $san = 'O-O-O';
-                $self->_move_piece(91, 94); last SPECIAL;
+                $self->{has_castled} |= CASTLE_B_OOO;
+                $self->_move_piece(0x70, 0x73);
+                last SPECIAL;
             }
         }
 
         # 2. is it en_passant?
         if ($is_pawn) {
-            if ($from_col != $to_col && !$self->get_piece_at($to_index)) {
-                $self->set_piece_at(get_index($from_row, $to_col), 0);
+            if ($from_col != $to_col && $prev_enpa == $to_index) {
+                $self->set_piece_at_index(get_index_from_row_col($from_row, $to_col), 0);
                 $is_capture = 1;
                 last SPECIAL;
             }
             if (abs($from_row - $to_row) == 2) {
-                $self->{enpa} = get_index(($from_row + $to_row) / 2, $from_col);
+                $self->{enpa} = get_index_from_row_col(($from_row + $to_row) / 2, $from_col);
             }
         }
     }
 
     {
-        my $tmp = $self->_move_piece($from_index, $to_index, $promote);
+        my $promote_id;
+        if ($promote) {
+            $promote_id = PIECE_TO_ID->{lc $promote} | $color;
+        }
+        my $tmp = $self->_move_piece($from_index, $to_index, $promote_id);
         $is_capture ||= $tmp;
     }
-    $self->{to_move} = 1 - $self->{to_move};
+    $self->{to_move} ^= 0x80;
 
     if ($self->{to_move}) {
         ++$self->{fullmove};
@@ -661,11 +749,11 @@ sub go_move {
     my $status = $self->_compute_valid_moves;
 
     if (!$san) {
-        $san = $is_pawn ? '' : uc $piece;
+        $san = $is_pawn ? '' : uc ID_TO_PIECE->[$piece & 0x3F];
 
         my $len = ($is_capture && $is_pawn || @$tpmove > 1) ? 1 : 0;
         foreach my $origin (@$tpmove) {
-            if ($origin != $from_index && $origin % 10 == $from_index % 10) {
+            if ($origin != $from_index && (($origin & 0x07) == ($from_index & 0x07))) {
                 $len = 2;
                 last;
             }
@@ -677,11 +765,12 @@ sub go_move {
         $san .= lc $to;
         $san .= "=$promote"
           if $promote;
-        if ($status->{mate}) {
-            $san .= '#';
-        } elsif ($status->{check}) {
-            $san .= '+';
-        }
+    }
+
+    if ($status->{mate}) {
+        $san .= '#';
+    } elsif ($status->{check}) {
+        $san .= '+';
     }
 
     # _debug("$orig_move \t\t\t $san");
@@ -703,14 +792,9 @@ sub go_move {
 
 sub _move_piece {
     my ($self, $from, $to, $promote) = @_;
-    my $p = $self->set_piece_at($from, 0);
-    my $color = piece_color($p);
-    my $lp = lc $p;
-    if ($promote) {
-        $p = $color ? uc $promote : lc $promote;
-    }
-    if ($lp eq 'k') {
-        if ($color) {
+    my $p = $self->set_piece_at_index($from, 0);
+    if ($p & 0x04) {            # is king?
+        if ($p & 0x80) {
             $self->{castle} = $self->{castle} | CASTLE_W_OOO ^ CASTLE_W_OOO;
             $self->{castle} = $self->{castle} | CASTLE_W_OO ^ CASTLE_W_OO;
         } else {
@@ -718,16 +802,16 @@ sub _move_piece {
             $self->{castle} = $self->{castle} | CASTLE_B_OO ^ CASTLE_B_OO;
         }
     }
-    if ($from == 21 || $to == 21) {
+    if ($from == 0x00 || $to == 0x00) {
         $self->{castle} = $self->{castle} | CASTLE_W_OOO ^ CASTLE_W_OOO;
-    } elsif ($from == 91 || $to == 91) {
+    } elsif ($from == 0x70 || $to == 0x70) {
         $self->{castle} = $self->{castle} | CASTLE_B_OOO ^ CASTLE_B_OOO;
-    } elsif ($from == 28 || $to == 28) {
+    } elsif ($from == 0x07 || $to == 0x07) {
         $self->{castle} = $self->{castle} | CASTLE_W_OO ^ CASTLE_W_OO;
-    } elsif ($from == 98 || $to == 98) {
+    } elsif ($from == 0x77 || $to == 0x77) {
         $self->{castle} = $self->{castle} | CASTLE_B_OO ^ CASTLE_B_OO;
     }
-    $self->set_piece_at($to, $p);
+    $self->set_piece_at_index($to, $promote || $p);
 }
 
 sub _compute_valid_moves {
@@ -735,18 +819,19 @@ sub _compute_valid_moves {
 
     my @pieces;
     my $king;
-    my $op_color = 1 - $self->{to_move};
+    my $op_color = $self->{to_move} ^ 0x80;
 
     for my $row (0..7) {
         for my $col (0..7) {
-            my ($p, $i) = $self->get_piece_at($row, $col);
+            my $i = get_index_from_row_col($row, $col);
+            my $p = $self->get_piece_at_index($i);
             if ($p) {
-                if (piece_color($p) == $self->{to_move}) {
+                if (($p & 0x80) == $self->{to_move}) {
                     push @pieces, {
                         from => $i,
                         piece => $p,
                     };
-                    if (lc $p eq 'k') {
+                    if ($p & 0x04) {
                         # remember king position
                         $king = $i;
                     }
@@ -755,7 +840,9 @@ sub _compute_valid_moves {
         }
     }
 
-    $self->{in_check} = $self->is_attacked($king, $op_color);
+    if (defined $king) {
+        $self->{in_check} = $self->is_attacked($king, $op_color);
+    }
 
     my @all_moves;
     my %hash_moves;
@@ -765,15 +852,20 @@ sub _compute_valid_moves {
         my $from = $p->{from};
         my $moves = $self->_get_allowed_moves($from);
         my $piece = $p->{piece};
-        my $try_move = {
-            from  => $from,
-            piece => $piece,
-        };
-        my $is_king = $from == $king;
-        my @valid_moves = grep {
-            $try_move->{to} = $_;
-            !$self->is_attacked($is_king ? $_ : $king, $op_color, $try_move);
-        } @$moves;
+        my @valid_moves;
+        if (defined $king) {
+            my $is_king = $from == $king;
+            my $try_move = {
+                from  => $from,
+                piece => $piece,
+            };
+            @valid_moves = grep {
+                $try_move->{to} = $_;
+                !$self->is_attacked($is_king ? $_ : $king, $op_color, $try_move);
+            } @$moves;
+        } else {
+            @valid_moves = @$moves;
+        }
         # _debug("Found moves for $piece");
         $p->{to} = \@valid_moves;
         push @all_moves, (map {
@@ -786,8 +878,11 @@ sub _compute_valid_moves {
         } @valid_moves);
     }
 
+    # _debug(Data::Dumper::Dumper($self));
+
     return $self->{status} = {
         moves      => \@all_moves,
+        pieces     => \@pieces,
         hash_moves => \%hash_moves,
         type_moves => \%type_moves,
         check      => $self->{in_check},
@@ -819,11 +914,13 @@ sub is_attacked {
 
     # _debug("Checking if " . get_field_id($i) . " is attacked");
 
-    $opponent_color = 1 - $self->{to_move}
+    $opponent_color = $self->{to_move} ^ 0x80
       unless defined $opponent_color;
 
     my $test = sub {
         my ($type, $i) = @_;
+        return 1
+          if $i & 0x88;
         my $p;
         if ($try_move) {
             if ($i == $try_move->{from}) {
@@ -836,8 +933,7 @@ sub is_attacked {
         } else {
             $p = $self->{pos}[$i];
         }
-        return 1 unless defined $p;
-        if ($p && piece_color($p) == $opponent_color && index($type, lc $p) >= 0) {
+        if ($p && ($p & $type) && ($p & 0x80) == $opponent_color) {
             die 1;
         }
         return $p;
@@ -848,38 +944,38 @@ sub is_attacked {
         # check pawns
         # _debug("... checking opponent pawns");
         if ($opponent_color) {
-            $test->('p', $i - 9);
-            $test->('p', $i - 11);
+            $test->(0x01, $i - 15);
+            $test->(0x01, $i - 17);
         } else {
-            $test->('p', $i + 9);
-            $test->('p', $i + 11);
+            $test->(0x01, $i + 15);
+            $test->(0x01, $i + 17);
         }
 
         # check knights
         # _debug("... checking opponent knights");
-        for my $step (19, 21, 8, 12, -19, -21, -8, -12) {
-            $test->('n', $i + $step);
+        for my $step (@MOVES_N) {
+            $test->(0x02, $i + $step);
         }
 
         # check bishops or queens
         # _debug("... checking opponent bishops");
-        for my $step (11, 9, -11, -9) {
+        for my $step (@MOVES_B) {
             my $j = $i;
             do { $j += $step }
-              while (!$test->('bq', $j));
+              while (!$test->(0x28, $j));
         }
 
         # check rooks or queens
         # _debug("... checking opponent rooks or queens");
-        for my $step (1, 10, -1, -10) {
+        for my $step (@MOVES_R) {
             my $j = $i;
             do { $j += $step }
-              while (!$test->('rq', $j));
+              while (!$test->(0x30, $j));
         }
 
         # _debug("... checking opponent king");
-        for my $step (9, 10, 11, -1, 1, -9, -10, -11) {
-            $test->('k', $i + $step);
+        for my $step (@MOVES_K) {
+            $test->(0x04, $i + $step);
         }
 
     };
@@ -889,9 +985,7 @@ sub is_attacked {
 
 sub _get_allowed_moves {
     my ($self, $index) = @_;
-    my $p = $self->get_piece_at($index);
-    my $color = piece_color($p);
-    $p = uc $p;
+    my $p = uc ID_TO_PIECE->[$self->get_piece_at_index($index) & 0x3F];
     my $method = "_get_allowed_${p}_moves";
     return $self->$method($index);
 }
@@ -899,38 +993,34 @@ sub _get_allowed_moves {
 sub _add_if_valid {
     my ($self, $moves, $from, $to) = @_;
 
-    my $what = $self->get_piece_at($to);
+    return undef
+      if $to & 0x88;
 
-    return
-      unless defined $what;           # off-board position
+    my $what = $self->get_piece_at_index($to);
 
-    my $p = $self->get_piece_at($from);
-    my $color = piece_color($p);
-    $p = lc $p;
+    my $p = $self->get_piece_at_index($from);
+    my $color = $p & 0x80;
 
-    if ($p eq 'k' && $self->is_attacked($to)) {
+    if (($p & 0x04) && $self->is_attacked($to)) {
         return undef;
     }
 
     if (!$what) {
-        if ($p eq 'p') {
-            if (abs($from % 10 - $to % 10) == 1) {
-                # _debug("En passant ($self->{enpa} | $to)");
-                if ($to == $self->{enpa}) { # check en passant
-                    # _debug("Adding en-passant: $p " . get_field_id($from) . "-" . get_field_id($to));
+        if ($p & 0x01) {
+            if (abs(($from & 0x07) - ($to & 0x07)) == 1) {
+                if ($self->{enpa} && $to == $self->{enpa}) { # check en passant
                     push @$moves, $to; # allowed
                     return $to;
                 }
                 return undef; # must take to move this way
             }
         }
-        # _debug("Adding move $p " . get_field_id($from) . "-" . get_field_id($to));
         push @$moves, $to;
         return $to;
     }
 
-    if (piece_color($what) != $color) {
-        if ($p eq 'p' && $from % 10 == $to % 10) {
+    if (($what & 0x80) != $color) {
+        if (($p & 0x01) && (($from & 0x07) == ($to & 0x07))) {
             return undef;   # pawns can't take this way
         }
         # _debug("Adding capture: $p " . get_field_id($from) . "-" . get_field_id($to));
@@ -944,23 +1034,22 @@ sub _add_if_valid {
 sub _get_allowed_P_moves {
     my ($self, $index, $moves) = @_;
     $moves ||= [];
-    my $color = $self->piece_color($index);
-    my $step = $color ? 10 : -10;
-    my $not_moved = $color
-      ? ($index >= 31 && $index <= 38)
-        : ($index >= 81 && $index <= 88);
-    if ($self->_add_if_valid($moves, $index, $index + $step) && $not_moved) {
+    my $color = $self->get_piece_at_index($index) & 0x80;
+    my $step = $color ? 16 : -16;
+    my $not_moved = ($index & 0xF0) == ($color ? 0x10 : 0x60);
+    if (defined $self->_add_if_valid($moves, $index, $index + $step) && $not_moved) {
         $self->_add_if_valid($moves, $index, $index + 2 * $step);
     }
-    $self->_add_if_valid($moves, $index, $index + ($color ? 11 : -9));
-    $self->_add_if_valid($moves, $index, $index + ($color ? 9 : -11));
+    $self->_add_if_valid($moves, $index, $index + ($color ? 17 : -15));
+    $self->_add_if_valid($moves, $index, $index + ($color ? 15 : -17));
+    # print Data::Dumper::Dumper($moves);
     return $moves;
 }
 
 sub _get_allowed_N_moves {
     my ($self, $index, $moves) = @_;
     $moves ||= [];
-    for my $step (19, 21, 8, 12, -19, -21, -8, -12) {
+    for my $step (@MOVES_N) {
         $self->_add_if_valid($moves, $index, $index + $step);
     }
     return $moves;
@@ -969,10 +1058,10 @@ sub _get_allowed_N_moves {
 sub _get_allowed_R_moves {
     my ($self, $index, $moves) = @_;
     $moves ||= [];
-    for my $step (1, 10, -1, -10) {
+    for my $step (@MOVES_R) {
         my $i = $index;
-        while ($self->_add_if_valid($moves, $index, $i += $step)) {
-            last if $self->get_piece_at($i);
+        while (defined $self->_add_if_valid($moves, $index, $i += $step)) {
+            last if $self->get_piece_at_index($i);
         }
     }
     return $moves;
@@ -981,10 +1070,10 @@ sub _get_allowed_R_moves {
 sub _get_allowed_B_moves {
     my ($self, $index, $moves) = @_;
     $moves ||= [];
-    for my $step (11, 9, -11, -9) {
+    for my $step (@MOVES_B) {
         my $i = $index;
-        while ($self->_add_if_valid($moves, $index, $i += $step)) {
-            last if $self->get_piece_at($i);
+        while (defined $self->_add_if_valid($moves, $index, $i += $step)) {
+            last if $self->get_piece_at_index($i);
         }
     }
     return $moves;
@@ -1001,28 +1090,25 @@ sub _get_allowed_Q_moves {
 sub _get_allowed_K_moves {
     my ($self, $index, $moves) = @_;
     $moves ||= [];
+    my $color = $self->get_piece_at_index($index) & 0x80;
 
-    for my $step (9, 10, 11, -9, -10, -11) {
-        $self->_add_if_valid($moves, $index, $index + $step);
-    }
-
-    my $color = $self->piece_color($index);
-
-    if ($self->_add_if_valid($moves, $index, $index + 1) &&
-          !$self->{in_check} && $self->can_castle($color, 0) &&
-            !$self->get_piece_at($index + 1) &&
-              !$self->get_piece_at($index + 2)) {
-        # kingside castling possible
-        $self->_add_if_valid($moves, $index, $index + 2);
-    }
-
-    if ($self->_add_if_valid($moves, $index, $index - 1) &&
-          !$self->{in_check} && $self->can_castle($color, 1) &&
-            !$self->get_piece_at($index - 1) &&
-              !$self->get_piece_at($index - 2) &&
-                !$self->get_piece_at($index - 3)) {
-        # queenside castling possible
-        $self->_add_if_valid($moves, $index, $index - 2);
+    for my $step (@MOVES_K) {
+        if (defined $self->_add_if_valid($moves, $index, $index + $step)) {
+            if ($step == 1 &&
+                  !$self->{in_check} && $self->can_castle($color, 0) &&
+                    !$self->get_piece_at_index($index + 1) &&
+                      !$self->get_piece_at_index($index + 2)) {
+                # kingside castling possible
+                $self->_add_if_valid($moves, $index, $index + 2);
+            } elsif ($step == -1 &&
+                       !$self->{in_check} && $self->can_castle($color, 1) &&
+                         !$self->get_piece_at_index($index - 1) &&
+                           !$self->get_piece_at_index($index - 2) &&
+                             !$self->get_piece_at_index($index - 3)) {
+                # queenside castling possible
+                $self->_add_if_valid($moves, $index, $index - 2);
+            }
+        }
     }
 
     return $moves;
@@ -1044,16 +1130,38 @@ sub can_castle {
     }
 }
 
+=head2 has_castled($color)
+
+Returns true (non-zero) if the specified color has castled, or false
+(zero) otherwise.  If the answer to this question is unknown (which
+can happen if we initialize the Chess::Rep object from an arbitrary
+position) then it returns undef.
+
+=cut
+
+sub has_castled {
+    my ($self, $color) = @_;
+    if (defined $self->{has_castled}) {
+        if ($color) {
+            return $self->{has_castled} & (CASTLE_W_OO | CASTLE_W_OOO);
+        } else {
+            return $self->{has_castled} & (CASTLE_B_OO | CASTLE_B_OOO);
+        }
+    }
+    return undef;
+}
+
 =head2 piece_color($piece)
 
 You can call this both as an object method, or standalone.  It returns
-the color of the specified piece.  Example:
+the color of the specified $piece, which must be in the established
+encoding.  Example:
 
-  Chess::Rep::piece_color('P') --> 1
-  Chess::Rep::piece_color('k') --> 0
-  $self->piece_color('e2') --> 1  (in standard position)
+  Chess::Rep::piece_color(0x81) --> 0x80 (white (pawn))
+  Chess::Rep::piece_color(0x04) --> 0 (black (king))
+  $self->piece_color('e2') --> 0x80 (white (standard start position))
 
-If you call it as a method, the argument must be a field specifier
+If you call it as a method, the argument B<must> be a field specifier
 (either full index or field ID) rather than a piece.
 
 =cut
@@ -1062,7 +1170,7 @@ sub piece_color {
     my $p = shift;
     $p = $p->get_piece_at(shift)
       if ref $p;
-    return ord($p) < 97 ? 1 : 0;
+    return $p & 0x80;
 }
 
 =head2 get_index($row, $col)
@@ -1083,7 +1191,21 @@ sub get_index {
     my ($row, $col) = @_;
     ($row, $col) = get_row_col($row)
       unless defined $col;
-    return $row * 10 + $col + 21;
+    return ($row << 4) | $col;
+}
+
+=head2 get_index_from_row_col($row, $col)
+
+This does the same as the above function, but it won't support a field
+ID (i.e. 'e3').  You have to pass it a row and col (which are 0..7)
+and it simply returns ($row << 4) | $col.  It's faster than the above
+when you don't really need support for field IDs.
+
+=cut
+
+sub get_index_from_row_col {
+    my ($row, $col) = @_;
+    return ($row << 4) | $col;
 }
 
 =head2 get_field_id($index)
@@ -1121,10 +1243,9 @@ sub get_row_col {
             $col - 65,
         );
     } else {
-        $id -= 21;
         return (
-            POSIX::floor($id / 10),
-            $id % 10,
+            ($id & 0x70) >> 4,
+            $id & 0x07,
         );
     }
 }
@@ -1161,7 +1282,7 @@ sub _debug {
 
  [2] Ideas for representing a chess board in memory.
 
-     http://www.atariarchives.org/deli/computer_chess.php
+     http://www.cis.uab.edu/hyatt/boardrep.html
 
 =head1 AUTHOR
 

@@ -1,6 +1,23 @@
 Revision history for Chess-Rep                          -*- change-log -*-
 
-0.1.1	Apr 26, 2008
+0.4	Aug 03, 2008
+	INCOMPATIBLE changes!  I skipped over 0.3 version number for this
+	reason.  The new version uses "0x88 board representation", along
+	with other changes that should make speed a lot better (for example,
+	pieces are bitwise codified in an integer, rather than a character,
+	making it a lot cheaper to do various analysis; see the
+	documentation).
+
+	Bugs fixed:
+
+	- supports "O-O-O+" and "O-O+" (rarely seen, but it can happen to
+	  check from a castling move).
+
+	- now catches illegal moves where FROM is specified (i.e. "a2e4"
+	  from the starting position) -- thanks Ken Takusagawa for the
+	  report.
+
+0.2	Apr 26, 2008
 	Fixed a nasty bug that caused "e8g8" to be always misinterpreted as
 	a O-O, even when another piece than the K was moved
 
