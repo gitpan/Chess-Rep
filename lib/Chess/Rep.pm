@@ -4,7 +4,7 @@ use strict;
 
 use POSIX;
 
-our $VERSION = '0.4';
+our $VERSION = '0.5';
 
 use constant ({
     CASTLE_W_OO  => 1,
@@ -292,7 +292,7 @@ sub set_from_fen {
     $self->{enpa} = $enpa ne '-' ? get_index($enpa) : 0;
     $self->{fullmove} = $fullmove;
     $self->{halfmove} = $halfmove;
-    $self->_compute_valid_moves;
+    $self->compute_valid_moves;
 }
 
 =head2 get_fen()
@@ -344,8 +344,8 @@ sub get_fen {
 =head2 status()
 
 Returns the status of the current position.  The status is
-automatically computed by an internal function --
-_compute_valid_moves() -- and it's a hash as follows:
+automatically computed whenever the position is changed with
+set_from_fen() or go_move().  The return valus is a hash as follows:
 
   {
     moves      => \@array_of_all_legal_moves,
@@ -430,10 +430,21 @@ The following are equivalent:
   $self->set_piece_at(0x14, 'P');
   $self->set_piece_at('e2', 'P');
 
+Piece can be a piece ID as per our internal representation, or a piece
+name such as 'P', 'B', etc.
+
+This function does not rebuild the valid moves hashes so if you call
+status() you'll get wrong results.  After you setup the position
+manually using this function (same applies for set_piece_at_index())
+you need to call $self->compute_valid_moves().
+
 =cut
 
 sub set_piece_at {
     my ($self, $index, $p) = @_;
+    if ($p =~ /^[pnbrqk]$/i) {
+        $p = PIECE_TO_ID->{$p};
+    }
     if ($index =~ /^[a-h]/oi) {
         $index = get_index($index);
     }
@@ -715,7 +726,7 @@ sub go_move {
 
         # 2. is it en_passant?
         if ($is_pawn) {
-            if ($from_col != $to_col && $prev_enpa == $to_index) {
+            if ($from_col != $to_col && $prev_enpa && $prev_enpa == $to_index) {
                 $self->set_piece_at_index(get_index_from_row_col($from_row, $to_col), 0);
                 $is_capture = 1;
                 last SPECIAL;
@@ -746,7 +757,7 @@ sub go_move {
         $self->{halfmove} = 0;
     }
 
-    my $status = $self->_compute_valid_moves;
+    my $status = $self->compute_valid_moves;
 
     if (!$san) {
         $san = $is_pawn ? '' : uc ID_TO_PIECE->[$piece & 0x3F];
@@ -801,8 +812,7 @@ sub _move_piece {
             $self->{castle} = $self->{castle} | CASTLE_B_OOO ^ CASTLE_B_OOO;
             $self->{castle} = $self->{castle} | CASTLE_B_OO ^ CASTLE_B_OO;
         }
-    }
-    if ($from == 0x00 || $to == 0x00) {
+    } elsif ($from == 0x00 || $to == 0x00) {
         $self->{castle} = $self->{castle} | CASTLE_W_OOO ^ CASTLE_W_OOO;
     } elsif ($from == 0x70 || $to == 0x70) {
         $self->{castle} = $self->{castle} | CASTLE_B_OOO ^ CASTLE_B_OOO;
@@ -814,7 +824,16 @@ sub _move_piece {
     $self->set_piece_at_index($to, $promote || $p);
 }
 
-sub _compute_valid_moves {
+=head2 compute_valid_moves()
+
+Rebuild the valid moves hashes that are returned by $self->status()
+for the current position.  You need to call this function when you
+manually interfere with the position, such as when you use
+set_piece_at() or set_piece_at_index() in order to setup the position.
+
+=cut
+
+sub compute_valid_moves {
     my ($self) = @_;
 
     my @pieces;
@@ -860,8 +879,8 @@ sub _compute_valid_moves {
                 piece => $piece,
             };
             @valid_moves = grep {
-                $try_move->{to} = $_;
-                !$self->is_attacked($is_king ? $_ : $king, $op_color, $try_move);
+                $_ & 0x100 || ( $try_move->{to} = $_,
+                                !$self->is_attacked($is_king ? $_ : $king, $op_color, $try_move) );
             } @$moves;
         } else {
             @valid_moves = @$moves;
@@ -869,7 +888,7 @@ sub _compute_valid_moves {
         # _debug("Found moves for $piece");
         $p->{to} = \@valid_moves;
         push @all_moves, (map {
-            my $to = $_;
+            my $to = $_ & 0xFF;
             $hash_moves{"$from-$to"} = 1;
             my $a = ($type_moves{$to} ||= {});
             my $b = ($a->{$piece} ||= []);
@@ -904,7 +923,7 @@ form:
     piece => $piece }
 
 In this case, the method will take the given move into account.  This
-is useful in order to test moves in _compute_valid_moves(), as we need
+is useful in order to test moves in compute_valid_moves(), as we need
 to filter out moves that leave the king in check.
 
 =cut
@@ -1009,7 +1028,7 @@ sub _add_if_valid {
         if ($p & 0x01) {
             if (abs(($from & 0x07) - ($to & 0x07)) == 1) {
                 if ($self->{enpa} && $to == $self->{enpa}) { # check en passant
-                    push @$moves, $to; # allowed
+                    push @$moves, $to | 0x100; # allowed
                     return $to;
                 }
                 return undef; # must take to move this way

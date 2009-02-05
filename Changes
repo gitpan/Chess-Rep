@@ -1,5 +1,15 @@
 Revision history for Chess-Rep                          -*- change-log -*-
 
+0.5	Feb 05, 2009
+	Fixed two bugs:
+
+	- allow en-passant while in check (it is possible that a pawn moves
+	  2 squares checking the enemy king, and a legal en-passant move can
+	  get out of check).  Thanks Alan Curry.
+
+	- A move b2xa1=Q (promote black pawn by capturing pawn from a1) was
+	  interpreted as en-passant and always cleared field a2.
+
 0.4	Aug 03, 2008
 	INCOMPATIBLE changes!  I skipped over 0.3 version number for this
 	reason.  The new version uses "0x88 board representation", along

@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                Chess-Rep
-version:             0.4
+version:             0.5
 abstract:            represent chess positions, generate list of legal moves, parse moves in various formats.
 license:             ~
 author:              
