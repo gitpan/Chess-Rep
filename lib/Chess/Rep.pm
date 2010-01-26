@@ -4,7 +4,7 @@ use strict;
 
 use POSIX;
 
-our $VERSION = '0.5';
+our $VERSION = '0.6';
 
 use constant ({
     CASTLE_W_OO  => 1,
@@ -673,10 +673,8 @@ sub go_move {
             die("Ambiguous move: $orig_move");
         }
     } else {
-        my @tmp = grep { $_ == $from_index } @$tpmove;
-        unless (@tmp) {
-            die("Illegal move: $orig_move");
-        }
+        die "Illegal move: $orig_move!\n"
+          unless ( defined $from_index && grep $_ == $from_index, @$tpmove );
     }
 
     unless (defined $from_index) {
@@ -761,18 +759,31 @@ sub go_move {
 
     if (!$san) {
         $san = $is_pawn ? '' : uc ID_TO_PIECE->[$piece & 0x3F];
+        $san .= lc (substr($from,0,1)) if ($is_pawn and $is_capture);
 
-        my $len = ($is_capture && $is_pawn || @$tpmove > 1) ? 1 : 0;
+        my ($ambiguous, $rank_ambiguous, $file_ambiguous) = (0, 0, 0);
         foreach my $origin (@$tpmove) {
-            if ($origin != $from_index && (($origin & 0x07) == ($from_index & 0x07))) {
-                $len = 2;
-                last;
+            if ($origin != $from_index) {
+                $ambiguous = 1;
+                $file_ambiguous |= (($origin & 0x07) == ($from_index & 0x07));
+                $rank_ambiguous |= (($origin & 0x70) == ($from_index & 0x70));
             }
         }
-
-        $san .= lc substr($from, 0, $len);
-        $san .= 'x'
-          if $is_capture;
+        # The capture by a pawn has already been dis-abmigousized above
+        if ($ambiguous and !($is_pawn and $is_capture)) {
+            if ($rank_ambiguous and $file_ambiguous) {
+                $san .= lc (substr($from,0,2));
+            } else {
+                if ($file_ambiguous) {
+                    $san .= lc (substr($from,1,1));
+                } else {
+                    $san .= lc (substr($from,0,1));
+                }
+            }
+        }
+        if ($is_capture) {
+            $san .= 'x';
+        }
         $san .= lc $to;
         $san .= "=$promote"
           if $promote;

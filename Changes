@@ -1,5 +1,11 @@
 Revision history for Chess-Rep                          -*- change-log -*-
 
+0.6	Jan 26, 2010
+
+	http://rt.cpan.org/Ticket/Display.html?id=53929 -- applied a patch
+	(thanks Olivier Macchioni) that generates the smallest SAN notation
+	in case of an ambiguity.
+
 0.5	Feb 05, 2009
 	Fixed two bugs:
 
