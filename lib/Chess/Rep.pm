@@ -4,7 +4,7 @@ use strict;
 
 use POSIX;
 
-our $VERSION = '0.6';
+our $VERSION = '0.7';
 
 use constant ({
     CASTLE_W_OO  => 1,
@@ -823,13 +823,17 @@ sub _move_piece {
             $self->{castle} = $self->{castle} | CASTLE_B_OOO ^ CASTLE_B_OOO;
             $self->{castle} = $self->{castle} | CASTLE_B_OO ^ CASTLE_B_OO;
         }
-    } elsif ($from == 0x00 || $to == 0x00) {
+    }
+    if ($from == 0x00 || $to == 0x00) {
         $self->{castle} = $self->{castle} | CASTLE_W_OOO ^ CASTLE_W_OOO;
-    } elsif ($from == 0x70 || $to == 0x70) {
+    }
+    if ($from == 0x70 || $to == 0x70) {
         $self->{castle} = $self->{castle} | CASTLE_B_OOO ^ CASTLE_B_OOO;
-    } elsif ($from == 0x07 || $to == 0x07) {
+    }
+    if ($from == 0x07 || $to == 0x07) {
         $self->{castle} = $self->{castle} | CASTLE_W_OO ^ CASTLE_W_OO;
-    } elsif ($from == 0x77 || $to == 0x77) {
+    }
+    if ($from == 0x77 || $to == 0x77) {
         $self->{castle} = $self->{castle} | CASTLE_B_OO ^ CASTLE_B_OO;
     }
     $self->set_piece_at_index($to, $promote || $p);
