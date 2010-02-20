@@ -4,7 +4,7 @@ use strict;
 
 use POSIX;
 
-our $VERSION = '0.7';
+our $VERSION = '0.8';
 
 use constant ({
     CASTLE_W_OO  => 1,
@@ -894,8 +894,8 @@ sub compute_valid_moves {
                 piece => $piece,
             };
             @valid_moves = grep {
-                $_ & 0x100 || ( $try_move->{to} = $_,
-                                !$self->is_attacked($is_king ? $_ : $king, $op_color, $try_move) );
+                $try_move->{to} = $_,
+                  !$self->is_attacked($is_king ? $_ : $king, $op_color, $try_move);
             } @$moves;
         } else {
             @valid_moves = @$moves;
@@ -956,16 +956,25 @@ sub is_attacked {
         return 1
           if $i & 0x88;
         my $p;
+        my $pos = $self->{pos};
         if ($try_move) {
-            if ($i == $try_move->{from}) {
+            my ($from, $to, $piece) = ($try_move->{from}, $try_move->{to}, $try_move->{piece});
+            if ($i == $from) {
                 $p = 0;
-            } elsif ($i == $try_move->{to}) {
-                $p = $try_move->{piece};
+            } elsif ($i == $to) {
+                $p = $piece;
+            } elsif ($self->{enpa} # en-passant field defined
+                       && ($piece & 0x01) # pawn
+                         && $to == $self->{enpa} # trying en-passant move
+                           && ($i == (($from & 0x70) | ($to & 0x07))) # captured piece field inquired
+                       ) {
+                # emulate en-passant (clear captured piece field)
+                $p = 0;
             } else {
-                $p = $self->{pos}[$i];
+                $p = $pos->[$i];
             }
         } else {
-            $p = $self->{pos}[$i];
+            $p = $pos->[$i];
         }
         if ($p && ($p & $type) && ($p & 0x80) == $opponent_color) {
             die 1;
@@ -1043,7 +1052,7 @@ sub _add_if_valid {
         if ($p & 0x01) {
             if (abs(($from & 0x07) - ($to & 0x07)) == 1) {
                 if ($self->{enpa} && $to == $self->{enpa}) { # check en passant
-                    push @$moves, $to | 0x100; # allowed
+                    push @$moves, $to;
                     return $to;
                 }
                 return undef; # must take to move this way
